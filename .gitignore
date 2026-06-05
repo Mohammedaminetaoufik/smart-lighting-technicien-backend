@@ -1,0 +1,41 @@
+# ─── Environnement ───────────────────────────────
+.env
+.env.local
+*.env
+!.env.example
+
+# ─── Binaires Go ─────────────────────────────────
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+technicien-mobile
+backend
+main
+/bin/
+/build/
+/dist/
+
+# ─── Tests / couverture ──────────────────────────
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# ─── Uploads / fichiers générés ──────────────────
+/uploads/
+/tmp/
+*.log
+
+# ─── Go workspace ────────────────────────────────
+go.work
+go.work.sum
+vendor/
+
+# ─── IDE / OS ────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

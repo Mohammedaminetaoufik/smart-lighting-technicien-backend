@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"technicien-mobile/internal/models"
@@ -15,9 +16,14 @@ import (
 // GET /api/map/overview
 func HandleMapOverview(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		lamps, _ := repository.GetMapLampadaires(c.Request.Context(), db, "", "", 0)
-		lcus, _ := repository.GetMapLCUs(c.Request.Context(), db)
-		missing, _ := repository.GetMissingLocationLampadaires(c.Request.Context(), db)
+		ctx := c.Request.Context()
+		lamps, _ := repository.GetMapLampadaires(ctx, db, "", "", 0)
+		lcus, _ := repository.GetMapLCUs(ctx, db)
+		conns, _ := repository.GetMapConnections(ctx, db, 0)
+		if lamps == nil { lamps = []models.MapLampadaire{} }
+		if lcus == nil { lcus = []models.MapLCU{} }
+		if conns == nil { conns = []models.MapConnection{} }
+
 		online, offline, maintenance := 0, 0, 0
 		for _, l := range lamps {
 			switch l.Etat {
@@ -26,13 +32,34 @@ func HandleMapOverview(db *sql.DB) gin.HandlerFunc {
 			case "maintenance": maintenance++
 			}
 		}
+		var openAlerts, missing int
+		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE status='open'`).Scan(&openAlerts)
+		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lampadaires WHERE (latitude IS NULL OR longitude IS NULL) AND archived_at IS NULL`).Scan(&missing)
+
+		// centre = première lampe géolocalisée sinon Rabat
+		center := gin.H{"latitude": 33.9911, "longitude": -6.8494, "zoom": 13}
+		for _, l := range lamps {
+			if l.Latitude != nil && l.Longitude != nil {
+				center = gin.H{"latitude": *l.Latitude, "longitude": *l.Longitude, "zoom": 13}
+				break
+			}
+		}
+
 		utils.RespondJSON(c, http.StatusOK, gin.H{
-			"lampadaires_total":       len(lamps),
-			"lampadaires_online":      online,
-			"lampadaires_offline":     offline,
-			"lampadaires_maintenance": maintenance,
-			"lcus_total":              len(lcus),
-			"missing_location":        len(missing),
+			"server_time": time.Now().UTC().Format(time.RFC3339),
+			"center":      center,
+			"lampadaires": lamps,
+			"lcus":        lcus,
+			"connections": conns,
+			"stats": gin.H{
+				"total_lampadaires": len(lamps),
+				"online":            online,
+				"offline":           offline,
+				"maintenance":       maintenance,
+				"total_lcus":        len(lcus),
+				"open_alerts":       openAlerts,
+				"missing_location":  missing,
+			},
 		})
 	}
 }

@@ -20,22 +20,34 @@ func HandleSyncBootstrap(db *sql.DB) gin.HandlerFunc {
 		techID, _ := utils.GetTestTechnicianID(c)
 		ctx := c.Request.Context()
 
+		dashboard, _ := repository.GetTechnicianDashboard(ctx, db, techID)
 		workOrders, _ := repository.ListTechnicianWorkOrders(ctx, db, repository.WorkOrderFilters{
 			TechnicianID: techID, Limit: 100,
 		})
 		lamps, _ := repository.GetTechnicianAssignedLampadaires(ctx, db, techID)
 		lcus, _ := repository.GetMapLCUs(ctx, db)
+		conns, _ := repository.GetMapConnections(ctx, db, 0)
+		commissioning, _ := repository.ListCommissioningTasks(ctx, db, "")
+		missing, _ := repository.GetMissingLocationLampadaires(ctx, db)
 
 		if workOrders == nil { workOrders = []models.MobileWorkOrder{} }
 		if lamps == nil { lamps = []models.MapLampadaire{} }
 		if lcus == nil { lcus = []models.MapLCU{} }
+		if conns == nil { conns = []models.MapConnection{} }
+		if commissioning == nil { commissioning = []models.CommissioningTask{} }
+		if missing == nil { missing = []models.MapLampadaire{} }
 
 		utils.RespondJSON(c, http.StatusOK, gin.H{
-			"technician_id": techID,
-			"server_time":   time.Now().UTC().Format(time.RFC3339),
-			"work_orders":   workOrders,
-			"lampadaires":   lamps,
-			"lcus":          lcus,
+			"technician_id":    techID,
+			"server_time":      time.Now().UTC().Format(time.RFC3339),
+			"dashboard":        dashboard,
+			"work_orders":      workOrders,
+			"lampadaires":      lamps,
+			"lcus":             lcus,
+			"connections":      conns,
+			"commissioning":    commissioning,
+			"missing_location": missing,
+			"last_sync_at":     dashboard.Sync.LastSyncAt,
 		})
 	}
 }

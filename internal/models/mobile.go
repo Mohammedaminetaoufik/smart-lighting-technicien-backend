@@ -230,3 +230,136 @@ type MobileDevice struct {
 	LastSyncAt   *time.Time `json:"last_sync_at"`
 	CreatedAt    time.Time  `json:"created_at"`
 }
+
+// ──────────────────────────────────────────────
+// Enriched Dashboard (Phase 2)
+// ──────────────────────────────────────────────
+
+type DashboardSync struct {
+	LastSyncAt       *string `json:"last_sync_at"`
+	OfflineAvailable bool    `json:"offline_available"`
+	PendingActions   int     `json:"pending_actions"`
+}
+
+type DashboardStatsBlock struct {
+	Assigned       int `json:"assigned"`
+	Urgent         int `json:"urgent"`
+	InProgress     int `json:"in_progress"`
+	CompletedToday int `json:"completed_today"`
+}
+
+type DashboardMapSummary struct {
+	AssignedLampadaires int `json:"assigned_lampadaires"`
+	NearbyLCUs          int `json:"nearby_lcus"`
+	CriticalAlerts      int `json:"critical_alerts"`
+	MissingLocation     int `json:"missing_location"`
+}
+
+type DashboardAlert struct {
+	ID                   int    `json:"id"`
+	Severity             string `json:"severity"`
+	Message              string `json:"message"`
+	LampadaireReference  string `json:"lampadaire_reference"`
+	Zone                 string `json:"zone"`
+}
+
+type TechnicianDashboard struct {
+	TechnicianID    int                  `json:"technician_id"`
+	ServerTime      string               `json:"server_time"`
+	Sync            DashboardSync        `json:"sync"`
+	Stats           DashboardStatsBlock  `json:"stats"`
+	NextWorkOrder   *MobileWorkOrder     `json:"next_work_order"`
+	MapSummary      DashboardMapSummary  `json:"map_summary"`
+	ImportantAlerts []DashboardAlert     `json:"important_alerts"`
+}
+
+// ──────────────────────────────────────────────
+// Lampadaire détail terrain (Phase 2)
+// ──────────────────────────────────────────────
+
+type LampadaireDetail struct {
+	ID                  int      `json:"id"`
+	Reference           string   `json:"reference"`
+	Zone                string   `json:"zone"`
+	Etat                string   `json:"etat"`
+	Intensite           int      `json:"intensite"`
+	Puissance           *float64 `json:"puissance"`
+	NominalPowerW       *int     `json:"nominal_power_w"`
+	Protocole           string   `json:"protocole"`
+	TypeDriver          string   `json:"type_driver"`
+	DriverBrand         string   `json:"driver_brand"`
+	DriverModel         string   `json:"driver_model"`
+	CommissioningStatus string   `json:"commissioning_status"`
+	Latitude            *float64 `json:"latitude"`
+	Longitude           *float64 `json:"longitude"`
+	LocationStatus      string   `json:"location_status"`
+	Address             string   `json:"address"`
+	Quartier            string   `json:"quartier"`
+	Notes               string   `json:"notes"`
+	LastSeenAt          *string  `json:"last_seen_at"`
+	LastCommandAt       *string  `json:"last_command_at"`
+	LCU                 *MobileLCU       `json:"lcu"`
+	Telemetry           *MobileTelemetry `json:"telemetry"`
+	OpenAlerts          []DiagnosticAlert `json:"open_alerts"`
+	WorkOrders          []MobileWorkOrder `json:"work_orders"`
+	AssignedToMe        bool     `json:"assigned_to_me"`
+}
+
+// ──────────────────────────────────────────────
+// LCU détail terrain (Phase 2)
+// ──────────────────────────────────────────────
+
+type LCUDetail struct {
+	ID               int      `json:"id"`
+	Reference        string   `json:"reference"`
+	Name             string   `json:"name"`
+	IPAddress        string   `json:"ip_address"`
+	Port             int      `json:"port"`
+	Protocol         string   `json:"protocol"`
+	Zone             string   `json:"zone"`
+	Address          string   `json:"address"`
+	Status           string   `json:"status"`
+	Latitude         *float64 `json:"latitude"`
+	Longitude        *float64 `json:"longitude"`
+	LastSeenAt       *string  `json:"last_seen_at"`
+	LastSyncAt       *string  `json:"last_sync_at"`
+	LampadairesCount int      `json:"lampadaires_count"`
+	OnlineCount      int      `json:"online_count"`
+	OfflineCount     int      `json:"offline_count"`
+	MaintenanceCount int      `json:"maintenance_count"`
+	Lampadaires      []MapLampadaire `json:"lampadaires"`
+}
+
+// ──────────────────────────────────────────────
+// Mise en service (Commissioning) (Phase 2)
+// ──────────────────────────────────────────────
+
+type CommissioningTask struct {
+	ID                  int      `json:"id"`
+	Reference           string   `json:"reference"`
+	Zone                string   `json:"zone"`
+	Etat                string   `json:"etat"`
+	CommissioningStatus string   `json:"commissioning_status"`
+	CommissioningStep   int      `json:"commissioning_step"`
+	TestCommStatus      string   `json:"test_comm_status"`
+	TestDimmingStatus   string   `json:"test_dimming_status"`
+	CommissioningNotes  string   `json:"commissioning_notes"`
+	Latitude            *float64 `json:"latitude"`
+	Longitude           *float64 `json:"longitude"`
+	LocationStatus      string   `json:"location_status"`
+	LCUID               *int     `json:"lcu_id"`
+	LCUReference        string   `json:"lcu_reference"`
+}
+
+// ──────────────────────────────────────────────
+// Field Note (note terrain)
+// ──────────────────────────────────────────────
+
+type FieldNote struct {
+	ID         int       `json:"id"`
+	EntityType string    `json:"entity_type"`
+	EntityID   int       `json:"entity_id"`
+	TechID     int       `json:"technician_id"`
+	Note       string    `json:"note"`
+	CreatedAt  time.Time `json:"created_at"`
+}

@@ -32,6 +32,18 @@ func ApplySyncAction(ctx context.Context, db *sql.DB, action models.SyncAction, 
 
 	switch action.Type {
 	case "ACCEPT_WORK_ORDER":
+		// Garde-fou anti double-prise : si le bon n'est plus libre (déjà pris
+		// par un autre technicien pendant que celui-ci était hors-ligne), on
+		// renvoie un conflit au lieu d'écraser silencieusement son affectation.
+		cur, errStat := repository.GetWorkOrderCurrentStatus(ctx, db, action.EntityID)
+		if errStat != nil {
+			status, errMsg, message = "error", errStat.Error(), "Bon de travail introuvable"
+			break
+		}
+		if cur != "created" && cur != "open" {
+			status, message = "conflict", fmt.Sprintf("Bon de travail #%d déjà pris par un autre technicien", action.EntityID)
+			break
+		}
 		err := applyWorkOrderTransition(ctx, db, action.EntityID, techID, "accepted", "", "")
 		if err != nil {
 			status, errMsg, message = "error", err.Error(), err.Error()
@@ -97,6 +109,91 @@ func ApplySyncAction(ctx context.Context, db *sql.DB, action models.SyncAction, 
 			status, errMsg, message = "error", err.Error(), err.Error()
 		} else {
 			message = "Localisation mise à jour"
+		}
+
+	case "ADD_LAMPADAIRE_FIELD_NOTE":
+		note, _ := action.Payload["note"].(string)
+		if note == "" {
+			status, errMsg, message = "error", "note vide", "note manquante"
+			break
+		}
+		if _, err := repository.InsertFieldNote(ctx, db, "lampadaire", action.EntityID, techID, note); err != nil {
+			status, errMsg, message = "error", err.Error(), err.Error()
+		} else {
+			message = "Note terrain lampadaire ajoutée"
+		}
+
+	case "ADD_LCU_FIELD_NOTE":
+		note, _ := action.Payload["note"].(string)
+		if note == "" {
+			status, errMsg, message = "error", "note vide", "note manquante"
+			break
+		}
+		if _, err := repository.InsertFieldNote(ctx, db, "lcu", action.EntityID, techID, note); err != nil {
+			status, errMsg, message = "error", err.Error(), err.Error()
+		} else {
+			message = "Note terrain LCU ajoutée"
+		}
+
+	case "TEST_LCU_CONNECTIVITY":
+		cur, err := repository.GetLCUStatus(ctx, db, action.EntityID)
+		if err != nil {
+			status, errMsg, message = "error", err.Error(), "LCU introuvable"
+			break
+		}
+		newStatus := "offline"
+		if cur == "online" { newStatus = "online" }
+		_ = repository.UpdateLCUSeen(ctx, db, action.EntityID, newStatus, false)
+		message = "Test de connectivité LCU effectué"
+
+	case "SYNC_LCU":
+		_ = repository.UpdateLCUSeen(ctx, db, action.EntityID, "online", true)
+		message = "Synchronisation LCU effectuée"
+
+	case "COMMISSIONING_UPDATE_GPS":
+		lat, _ := toFloat(action.Payload["latitude"])
+		lng, _ := toFloat(action.Payload["longitude"])
+		if err := repository.CommissioningUpdateGPS(ctx, db, action.EntityID, lat, lng); err != nil {
+			status, errMsg, message = "error", err.Error(), err.Error()
+		} else {
+			message = "GPS de mise en service mis à jour"
+		}
+
+	case "COMMISSIONING_TEST_COMMUNICATION":
+		if err := repository.CommissioningSetTestComm(ctx, db, action.EntityID, true); err != nil {
+			status, errMsg, message = "error", err.Error(), err.Error()
+		} else {
+			message = "Test communication enregistré"
+		}
+
+	case "COMMISSIONING_TEST_DIMMING":
+		if err := repository.CommissioningSetTestDimming(ctx, db, action.EntityID, true); err != nil {
+			status, errMsg, message = "error", err.Error(), err.Error()
+		} else {
+			message = "Test dimming enregistré"
+		}
+
+	case "COMMISSIONING_VALIDATE":
+		if err := repository.CommissioningValidate(ctx, db, action.EntityID); err != nil {
+			status, errMsg, message = "error", err.Error(), err.Error()
+		} else {
+			message = "Mise en service validée"
+		}
+
+	case "COMMISSIONING_FAIL":
+		reason, _ := action.Payload["reason"].(string)
+		if err := repository.CommissioningFail(ctx, db, action.EntityID, reason); err != nil {
+			status, errMsg, message = "error", err.Error(), err.Error()
+		} else {
+			message = "Échec de mise en service enregistré"
+		}
+
+	case "COMMISSIONING_ADD_NOTE":
+		note, _ := action.Payload["note"].(string)
+		if err := repository.CommissioningAddNote(ctx, db, action.EntityID, note); err != nil {
+			status, errMsg, message = "error", err.Error(), err.Error()
+		} else {
+			message = "Note de mise en service ajoutée"
 		}
 
 	default:

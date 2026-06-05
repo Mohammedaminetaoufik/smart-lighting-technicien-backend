@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"technicien-mobile/internal/models"
@@ -11,11 +12,16 @@ import (
 
 type WorkOrderFilters struct {
 	TechnicianID int
-	Status       string
-	Priority     string
-	Zone         string
-	Limit        int
-	Offset       int
+	// Scope controls which work orders are returned:
+	//   "mine"      → assigned to this technician (technician_id or assigned_to)
+	//   "available" → unassigned and still open/created (pool to pick up)
+	//   "all" or "" → every active work order (default; lets technicians take any)
+	Scope    string
+	Status   string
+	Priority string
+	Zone     string
+	Limit    int
+	Offset   int
 }
 
 func ListTechnicianWorkOrders(ctx context.Context, db *sql.DB, f WorkOrderFilters) ([]models.MobileWorkOrder, error) {
@@ -34,26 +40,40 @@ func ListTechnicianWorkOrders(ctx context.Context, db *sql.DB, f WorkOrderFilter
 		FROM work_orders wo
 		LEFT JOIN lampadaires l   ON l.id = wo.lampadaire_id
 		LEFT JOIN lcus lcu        ON lcu.id = l.lcu_id
-		LEFT JOIN alerts a        ON a.id = wo.source_alert_id
-		WHERE (wo.technician_id = $1 OR wo.assigned_to = $1)
-		  AND wo.status NOT IN ('closed','cancelled')`
-	args := []any{f.TechnicianID}
-	n := 2
+		LEFT JOIN alerts a        ON a.id = wo.source_alert_id`
+
+	conds := []string{"wo.status NOT IN ('closed','cancelled')"}
+	args := []any{}
+	n := 1
+
+	switch f.Scope {
+	case "mine":
+		conds = append(conds, fmt.Sprintf("(wo.technician_id = $%d OR wo.assigned_to = $%d)", n, n))
+		args = append(args, f.TechnicianID)
+		n++
+	case "available":
+		conds = append(conds, "wo.technician_id IS NULL AND wo.assigned_to IS NULL AND wo.status IN ('created','open')")
+	default:
+		// "all" (or empty): no assignment restriction — every active work order is visible.
+	}
+
 	if f.Status != "" {
-		query += fmt.Sprintf(" AND wo.status = $%d", n)
+		conds = append(conds, fmt.Sprintf("wo.status = $%d", n))
 		args = append(args, f.Status)
 		n++
 	}
 	if f.Priority != "" {
-		query += fmt.Sprintf(" AND wo.priority = $%d", n)
+		conds = append(conds, fmt.Sprintf("wo.priority = $%d", n))
 		args = append(args, f.Priority)
 		n++
 	}
 	if f.Zone != "" {
-		query += fmt.Sprintf(" AND (wo.zone = $%d OR l.zone = $%d)", n, n)
+		conds = append(conds, fmt.Sprintf("(wo.zone = $%d OR l.zone = $%d)", n, n))
 		args = append(args, f.Zone)
 		n++
 	}
+
+	query += "\n\t\tWHERE " + strings.Join(conds, "\n\t\t  AND ")
 	query += fmt.Sprintf(`
 		ORDER BY
 		  CASE wo.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
@@ -269,4 +289,76 @@ func GetWorkOrderCurrentStatus(ctx context.Context, db *sql.DB, id int) (string,
 	var status string
 	err := db.QueryRowContext(ctx, `SELECT status FROM work_orders WHERE id=$1`, id).Scan(&status)
 	return status, err
+}
+
+// GetTechnicianDashboard builds the enriched Phase-2 dashboard payload.
+func GetTechnicianDashboard(ctx context.Context, db *sql.DB, techID int) (models.TechnicianDashboard, error) {
+	d := models.TechnicianDashboard{
+		TechnicianID: techID,
+		ServerTime:   time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Stats block
+	_ = db.QueryRowContext(ctx, `
+		SELECT
+		  COUNT(*) FILTER (WHERE status IN ('created','open','accepted'))    AS assigned,
+		  COUNT(*) FILTER (WHERE priority IN ('critical','high') AND status NOT IN ('closed','cancelled','resolved')) AS urgent,
+		  COUNT(*) FILTER (WHERE status = 'in_progress')                     AS in_progress,
+		  COUNT(*) FILTER (WHERE status = 'resolved' AND DATE(resolved_at) = CURRENT_DATE) AS completed_today
+		FROM work_orders
+		WHERE technician_id = $1 OR assigned_to = $1`, techID).
+		Scan(&d.Stats.Assigned, &d.Stats.Urgent, &d.Stats.InProgress, &d.Stats.CompletedToday)
+
+	// Next work order (prochaine intervention prioritaire)
+	next, _ := ListTechnicianWorkOrders(ctx, db, WorkOrderFilters{TechnicianID: techID, Scope: "mine", Limit: 1})
+	if len(next) > 0 {
+		d.NextWorkOrder = &next[0]
+	}
+
+	// Map summary
+	_ = db.QueryRowContext(ctx, `
+		SELECT
+		  (SELECT COUNT(DISTINCT l.id) FROM lampadaires l
+		     JOIN work_orders wo ON wo.lampadaire_id = l.id
+		     WHERE (wo.technician_id=$1 OR wo.assigned_to=$1) AND wo.status NOT IN ('closed','cancelled','resolved')),
+		  (SELECT COUNT(*) FROM lcus),
+		  (SELECT COUNT(*) FROM alerts WHERE severity='critical' AND status='open'),
+		  (SELECT COUNT(*) FROM lampadaires WHERE (latitude IS NULL OR longitude IS NULL) AND archived_at IS NULL)
+		`, techID).
+		Scan(&d.MapSummary.AssignedLampadaires, &d.MapSummary.NearbyLCUs,
+			&d.MapSummary.CriticalAlerts, &d.MapSummary.MissingLocation)
+
+	// Important alerts (critiques liées aux lampadaires du technicien sinon globales)
+	rows, _ := db.QueryContext(ctx, `
+		SELECT a.id, COALESCE(a.severity,'info'), COALESCE(a.message,''),
+		       COALESCE(l.reference,''), COALESCE(l.zone,'')
+		FROM alerts a
+		LEFT JOIN lampadaires l ON l.id = a.lampadaire_id
+		WHERE a.status='open' AND a.severity IN ('critical','major')
+		ORDER BY a.created_at DESC LIMIT 5`)
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var al models.DashboardAlert
+			if err := rows.Scan(&al.ID, &al.Severity, &al.Message, &al.LampadaireReference, &al.Zone); err == nil {
+				d.ImportantAlerts = append(d.ImportantAlerts, al)
+			}
+		}
+	}
+	if d.ImportantAlerts == nil {
+		d.ImportantAlerts = []models.DashboardAlert{}
+	}
+
+	// Sync info
+	var lastSync sql.NullString
+	_ = db.QueryRowContext(ctx, `
+		SELECT TO_CHAR(MAX(last_sync_at), 'YYYY-MM-DD"T"HH24:MI:SSZ')
+		FROM mobile_devices WHERE technician_id=$1`, techID).Scan(&lastSync)
+	if lastSync.Valid {
+		d.Sync.LastSyncAt = &lastSync.String
+	}
+	d.Sync.OfflineAvailable = true
+	d.Sync.PendingActions = 0 // côté serveur on ne connaît pas la file locale
+
+	return d, nil
 }

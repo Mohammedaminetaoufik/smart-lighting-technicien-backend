@@ -20,6 +20,7 @@ func HandleListMyWorkOrders(db *sql.DB) gin.HandlerFunc {
 		offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 		filters := repository.WorkOrderFilters{
 			TechnicianID: techID,
+			Scope:        c.DefaultQuery("scope", "all"),
 			Status:       c.Query("status"),
 			Priority:     c.Query("priority"),
 			Zone:         c.Query("zone"),

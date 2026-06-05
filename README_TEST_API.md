@@ -336,4 +336,181 @@ curl "http://localhost:8080/api/workorders/1"
 - `DEFAULT_TECHNICIAN_ID` dans `.env` = technicien utilisé par défaut si aucun paramètre fourni
 - Toutes les actions sont enregistrées dans `access_logs` (visible dans la plateforme web admin)
 - Les `local_id` sont uniques — renvoyer le même `local_id` retourne le résultat déjà connu (idempotence)
-- Les tables `mobile_devices` et `mobile_sync_logs` sont créées automatiquement au démarrage
+- Les tables `mobile_devices`, `mobile_sync_logs` et `field_notes` sont créées automatiquement au démarrage
+
+---
+
+# PHASE 2 — Endpoints terrain complets
+
+## Dashboard enrichi
+
+```bash
+curl "http://localhost:8081/api/mobile/me/dashboard?technician_id=1"
+# Retourne: sync, stats{assigned,urgent,in_progress,completed_today},
+#           next_work_order, map_summary, important_alerts
+```
+
+## Lampadaires (consultation terrain)
+
+```bash
+# Liste avec filtres
+curl "http://localhost:8081/api/mobile/lampadaires"
+curl "http://localhost:8081/api/mobile/lampadaires?etat=offline&zone=Agdal&search=LP-04"
+
+# Détail complet (caractéristiques + télémétrie + alertes + interventions liées)
+curl "http://localhost:8081/api/mobile/lampadaires/1/details?technician_id=1"
+
+# Sous-ressources
+curl "http://localhost:8081/api/mobile/lampadaires/1/diagnostic"
+curl "http://localhost:8081/api/mobile/lampadaires/1/telemetry/latest"
+curl "http://localhost:8081/api/mobile/lampadaires/1/alerts"
+curl "http://localhost:8081/api/mobile/lampadaires/1/workorders"
+
+# Note terrain
+curl -X POST http://localhost:8081/api/mobile/lampadaires/1/field-note \
+  -H "Content-Type: application/json" \
+  -d '{"technician_id":1,"note":"Poteau légèrement penché, à surveiller."}'
+
+# Mise à jour GPS (autorisée si lié à intervention ou en mise en service)
+curl -X POST http://localhost:8081/api/mobile/lampadaires/1/location \
+  -H "Content-Type: application/json" \
+  -d '{"technician_id":1,"latitude":33.9911,"longitude":-6.8494,"accuracy":8,"source":"technician_mobile"}'
+```
+
+## LCUs (consultation + diagnostic terrain)
+
+```bash
+# Liste avec compteurs de lampadaires
+curl "http://localhost:8081/api/mobile/lcus"
+
+# Détail + lampadaires rattachés
+curl "http://localhost:8081/api/mobile/lcus/1/details"
+curl "http://localhost:8081/api/mobile/lcus/1/lampadaires"
+curl "http://localhost:8081/api/mobile/lcus/1/diagnostic"
+
+# Test de connectivité (simulation)
+curl -X POST http://localhost:8081/api/mobile/lcus/1/test \
+  -H "Content-Type: application/json" -d '{"technician_id":1}'
+
+# Synchronisation LCU (simulation)
+curl -X POST http://localhost:8081/api/mobile/lcus/1/sync \
+  -H "Content-Type: application/json" -d '{"technician_id":1}'
+
+# Note terrain LCU
+curl -X POST http://localhost:8081/api/mobile/lcus/1/field-note \
+  -H "Content-Type: application/json" \
+  -d '{"technician_id":1,"note":"Armoire LCU accessible, antenne OK."}'
+```
+
+## Mise en service (commissioning)
+
+```bash
+# Liste des lampadaires à mettre en service
+curl "http://localhost:8081/api/mobile/commissioning"
+curl "http://localhost:8081/api/mobile/commissioning?status=located"
+
+# Détail d'une tâche
+curl "http://localhost:8081/api/mobile/commissioning/1"
+
+# Confirmer/corriger GPS (passe en 'located')
+curl -X POST http://localhost:8081/api/mobile/commissioning/1/update-gps \
+  -H "Content-Type: application/json" \
+  -d '{"technician_id":1,"latitude":33.9911,"longitude":-6.8494}'
+
+# Tester la communication
+curl -X POST http://localhost:8081/api/mobile/commissioning/1/test-communication \
+  -H "Content-Type: application/json" -d '{"technician_id":1}'
+
+# Tester le dimming (passe en 'tested')
+curl -X POST http://localhost:8081/api/mobile/commissioning/1/test-dimming \
+  -H "Content-Type: application/json" -d '{"technician_id":1}'
+
+# Valider la mise en service (passe en 'commissioned')
+curl -X POST http://localhost:8081/api/mobile/commissioning/1/validate \
+  -H "Content-Type: application/json" -d '{"technician_id":1}'
+
+# Signaler un échec
+curl -X POST http://localhost:8081/api/mobile/commissioning/1/fail \
+  -H "Content-Type: application/json" \
+  -d '{"technician_id":1,"reason":"Driver défectueux, remplacement nécessaire."}'
+
+# Ajouter une note de mise en service
+curl -X POST http://localhost:8081/api/mobile/commissioning/1/add-note \
+  -H "Content-Type: application/json" \
+  -d '{"technician_id":1,"note":"Configuration validée sur site."}'
+```
+
+## Carte enrichie
+
+```bash
+# Overview complet (lampadaires + lcus + connections + stats + center)
+curl "http://localhost:8081/api/map/overview"
+
+# Contexte technicien (assignés, proximité, lcus, connexions, missing)
+curl "http://localhost:8081/api/map/technician-context?technician_id=1&include_lcus=true&include_connections=true"
+```
+
+## Bootstrap offline enrichi
+
+```bash
+# Retourne: dashboard + work_orders + lampadaires + lcus + connections
+#           + commissioning + missing_location + last_sync_at
+curl "http://localhost:8081/api/mobile/sync/bootstrap?technician_id=1"
+```
+
+## Nouveaux types d'actions sync (push offline)
+
+```bash
+curl -X POST http://localhost:8081/api/mobile/sync/push \
+  -H "Content-Type: application/json" \
+  -d '{
+    "technician_id": 1,
+    "device_id": "test-phone-001",
+    "actions": [
+      { "local_id": "lamp_note_001", "type": "ADD_LAMPADAIRE_FIELD_NOTE", "entity": "lampadaire", "entity_id": 1, "payload": {"note":"Note offline lampadaire"}, "created_at": "2026-06-05T10:00:00Z" },
+      { "local_id": "lcu_note_001",  "type": "ADD_LCU_FIELD_NOTE", "entity": "lcu", "entity_id": 1, "payload": {"note":"Note offline LCU"}, "created_at": "2026-06-05T10:01:00Z" },
+      { "local_id": "lcu_test_001",  "type": "TEST_LCU_CONNECTIVITY", "entity": "lcu", "entity_id": 1, "payload": {}, "created_at": "2026-06-05T10:02:00Z" },
+      { "local_id": "comm_gps_001",  "type": "COMMISSIONING_UPDATE_GPS", "entity": "commissioning", "entity_id": 1, "payload": {"latitude":33.99,"longitude":-6.84}, "created_at": "2026-06-05T10:03:00Z" },
+      { "local_id": "comm_val_001",  "type": "COMMISSIONING_VALIDATE", "entity": "commissioning", "entity_id": 1, "payload": {}, "created_at": "2026-06-05T10:04:00Z" }
+    ]
+  }'
+```
+
+**Types d'actions supportés** : `ACCEPT_WORK_ORDER`, `START_WORK_ORDER`, `ADD_NOTE`, `RESOLVE_WORK_ORDER`, `BLOCK_WORK_ORDER`, `UPDATE_LOCATION`, `ADD_LAMPADAIRE_FIELD_NOTE`, `ADD_LCU_FIELD_NOTE`, `TEST_LCU_CONNECTIVITY`, `SYNC_LCU`, `COMMISSIONING_UPDATE_GPS`, `COMMISSIONING_TEST_COMMUNICATION`, `COMMISSIONING_TEST_DIMMING`, `COMMISSIONING_VALIDATE`, `COMMISSIONING_FAIL`, `COMMISSIONING_ADD_NOTE`
+
+---
+
+# Scénario de collaboration Web ↔ Mobile (Phase 2)
+
+```bash
+# 1. Admin web assigne une intervention au technicien 1 (via /workorders dans la webapp)
+
+# 2. Mobile voit l'intervention
+curl "http://localhost:8081/api/mobile/me/workorders?technician_id=1"
+
+# 3. Mobile accepte → Web admin voit status 'accepted' (même DB)
+curl -X POST "http://localhost:8081/api/mobile/workorders/15/accept" \
+  -H "Content-Type: application/json" -d '{"technician_id":1}'
+
+# 4. Mobile démarre → Web admin voit 'in_progress'
+curl -X POST "http://localhost:8081/api/mobile/workorders/15/start" \
+  -H "Content-Type: application/json" -d '{"technician_id":1}'
+
+# 5. Mobile consulte le lampadaire et son diagnostic
+curl "http://localhost:8081/api/mobile/lampadaires/44/details"
+
+# 6. Mobile ajoute une note → visible dans work_order_logs côté admin
+curl -X POST "http://localhost:8081/api/mobile/workorders/15/add-note" \
+  -H "Content-Type: application/json" -d '{"technician_id":1,"note":"Fusible grillé identifié."}'
+
+# 7. Mobile teste la LCU
+curl -X POST "http://localhost:8081/api/mobile/lcus/3/test" \
+  -H "Content-Type: application/json" -d '{"technician_id":1}'
+
+# 8. Mobile résout → Web admin voit 'resolved' + resolved_at
+curl -X POST "http://localhost:8081/api/mobile/workorders/15/resolve" \
+  -H "Content-Type: application/json" -d '{"technician_id":1,"resolution_note":"Fusible remplacé."}'
+
+# 9. Vérifier côté web admin (port 8080)
+curl "http://localhost:8080/api/workorders/15"
+```

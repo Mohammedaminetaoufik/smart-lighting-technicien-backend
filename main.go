@@ -72,9 +72,34 @@ func main() {
 		mobile.POST("/workorders/:id/resolve", controllers.HandleResolveWorkOrder(db))
 		mobile.POST("/workorders/:id/block", controllers.HandleBlockWorkOrder(db))
 
-		// Diagnostic lampadaire
+		// Lampadaires (consultation terrain)
+		mobile.GET("/lampadaires", controllers.HandleListLampadaires(db))
+		mobile.GET("/lampadaires/:id/details", controllers.HandleLampadaireDetails(db))
 		mobile.GET("/lampadaires/:id/diagnostic", controllers.HandleDiagnostic(db))
 		mobile.GET("/lampadaires/:id/telemetry/latest", controllers.HandleLatestTelemetry(db))
+		mobile.GET("/lampadaires/:id/alerts", controllers.HandleLampadaireAlerts(db))
+		mobile.GET("/lampadaires/:id/workorders", controllers.HandleLampadaireWorkOrders(db))
+		mobile.POST("/lampadaires/:id/field-note", controllers.HandleLampadaireFieldNote(db))
+		mobile.POST("/lampadaires/:id/location", controllers.HandleUpdateLocation(db))
+
+		// LCUs (consultation + diagnostic terrain)
+		mobile.GET("/lcus", controllers.HandleListLCUsMobile(db))
+		mobile.GET("/lcus/:id/details", controllers.HandleLCUDetails(db))
+		mobile.GET("/lcus/:id/lampadaires", controllers.HandleLCULampadairesMobile(db))
+		mobile.GET("/lcus/:id/diagnostic", controllers.HandleLCUDiagnostic(db))
+		mobile.POST("/lcus/:id/test", controllers.HandleLCUTest(db))
+		mobile.POST("/lcus/:id/sync", controllers.HandleLCUSync(db))
+		mobile.POST("/lcus/:id/field-note", controllers.HandleLCUFieldNote(db))
+
+		// Mise en service (commissioning terrain)
+		mobile.GET("/commissioning", controllers.HandleListCommissioning(db))
+		mobile.GET("/commissioning/:id", controllers.HandleGetCommissioning(db))
+		mobile.POST("/commissioning/:id/update-gps", controllers.HandleCommissioningGPS(db))
+		mobile.POST("/commissioning/:id/test-communication", controllers.HandleCommissioningTestComm(db))
+		mobile.POST("/commissioning/:id/test-dimming", controllers.HandleCommissioningTestDimming(db))
+		mobile.POST("/commissioning/:id/validate", controllers.HandleCommissioningValidate(db))
+		mobile.POST("/commissioning/:id/fail", controllers.HandleCommissioningFail(db))
+		mobile.POST("/commissioning/:id/add-note", controllers.HandleCommissioningNote(db))
 
 		// Synchronisation JSON offline-first
 		mobile.GET("/sync/bootstrap", controllers.HandleSyncBootstrap(db))

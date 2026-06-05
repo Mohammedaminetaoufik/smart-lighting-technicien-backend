@@ -32,6 +32,16 @@ func EnsureMobileSchema(db *sql.DB) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_mobile_sync_local_id ON mobile_sync_logs(local_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_mobile_sync_technician ON mobile_sync_logs(technician_id)`,
+		// Notes terrain saisies par les techniciens (lampadaire / lcu)
+		`CREATE TABLE IF NOT EXISTS field_notes (
+			id            SERIAL PRIMARY KEY,
+			entity_type   TEXT NOT NULL,
+			entity_id     INT  NOT NULL,
+			technician_id INT  NOT NULL,
+			note          TEXT NOT NULL,
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_field_notes_entity ON field_notes(entity_type, entity_id)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {

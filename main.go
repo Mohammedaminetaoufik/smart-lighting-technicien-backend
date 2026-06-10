@@ -30,6 +30,8 @@ func main() {
 		log.Printf("[main] avertissement schema: %v", err)
 	}
 
+	repository.SeedTestDataIfEmpty(db)
+
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}

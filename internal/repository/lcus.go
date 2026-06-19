@@ -90,6 +90,14 @@ func UpdateLCUSeen(ctx context.Context, db *sql.DB, id int, status string, sync 
 	return err
 }
 
+// UpdateLCULocation sets the GPS coordinates of a LCU recorded from the field.
+func UpdateLCULocation(ctx context.Context, db *sql.DB, id int, latitude, longitude float64) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE lcus SET latitude=$1, longitude=$2, updated_at=NOW() WHERE id=$3`,
+		latitude, longitude, id)
+	return err
+}
+
 func GetLCUStatus(ctx context.Context, db *sql.DB, id int) (string, error) {
 	var status string
 	err := db.QueryRowContext(ctx, `SELECT COALESCE(status,'unknown') FROM lcus WHERE id=$1`, id).Scan(&status)

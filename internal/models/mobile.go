@@ -106,27 +106,40 @@ type MobileTelemetry struct {
 	CreatedAt   *time.Time `json:"created_at"`
 }
 
+type MobileMaintenanceWindow struct {
+	ID          int       `json:"id"`
+	Title       string    `json:"title"`
+	Status      string    `json:"status"`
+	ImpactLevel string    `json:"impact_level"`
+	StartAt     time.Time `json:"start_at"`
+	EndAt       time.Time `json:"end_at"`
+	Reason      string    `json:"reason,omitempty"`
+}
+
 type MobileWorkOrder struct {
-	ID             int               `json:"id"`
-	Title          string            `json:"title"`
-	Description    string            `json:"description"`
-	Status         string            `json:"status"`
-	Priority       string            `json:"priority"`
-	Zone           string            `json:"zone,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedAt      time.Time         `json:"updated_at"`
-	AcceptedAt     *time.Time        `json:"accepted_at,omitempty"`
-	StartedAt      *time.Time        `json:"started_at,omitempty"`
-	ResolvedAt     *time.Time        `json:"resolved_at,omitempty"`
-	DueDate        *time.Time        `json:"due_date,omitempty"`
-	TechnicianID   *int              `json:"technician_id,omitempty"`
-	AssignedToName string            `json:"assigned_to_name,omitempty"`
-	ResolutionNote string            `json:"resolution_note,omitempty"`
-	Lampadaire     *MobileLampadaire `json:"lampadaire,omitempty"`
-	LCU            *MobileLCU        `json:"lcu,omitempty"`
-	Alert          *MobileAlert      `json:"alert,omitempty"`
-	Telemetry      *MobileTelemetry  `json:"telemetry,omitempty"`
-	Logs           []WorkOrderLog    `json:"logs,omitempty"`
+	ID                  int                      `json:"id"`
+	Title               string                   `json:"title"`
+	Description         string                   `json:"description"`
+	Status              string                   `json:"status"`
+	Priority            string                   `json:"priority"`
+	Zone                string                   `json:"zone,omitempty"`
+	CreatedAt           time.Time                `json:"created_at"`
+	UpdatedAt           time.Time                `json:"updated_at"`
+	AcceptedAt          *time.Time               `json:"accepted_at,omitempty"`
+	StartedAt           *time.Time               `json:"started_at,omitempty"`
+	ResolvedAt          *time.Time               `json:"resolved_at,omitempty"`
+	DueDate             *time.Time               `json:"due_date,omitempty"`
+	TechnicianID        *int                     `json:"technician_id,omitempty"`
+	AssignedToName      string                   `json:"assigned_to_name,omitempty"`
+	ResolutionNote      string                   `json:"resolution_note,omitempty"`
+	SourceAlertID       *int                     `json:"source_alert_id,omitempty"`
+	MaintenanceWindowID *int                     `json:"maintenance_window_id,omitempty"`
+	Lampadaire          *MobileLampadaire        `json:"lampadaire,omitempty"`
+	LCU                 *MobileLCU               `json:"lcu,omitempty"`
+	Alert               *MobileAlert             `json:"alert,omitempty"`
+	MaintenanceWindow   *MobileMaintenanceWindow  `json:"maintenance_window,omitempty"`
+	Telemetry           *MobileTelemetry         `json:"telemetry,omitempty"`
+	Logs                []WorkOrderLog           `json:"logs,omitempty"`
 }
 
 type WorkOrderLog struct {

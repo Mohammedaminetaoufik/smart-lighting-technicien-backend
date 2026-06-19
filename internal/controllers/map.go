@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"database/sql"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -215,6 +216,41 @@ func HandleUpdateLocation(db *sql.DB) gin.HandlerFunc {
 	}
 }
 
+// HandleUpdateLCULocation handles POST /api/mobile/lcus/:id/location
+func HandleUpdateLCULocation(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := utils.ParseIDParam(c, "id")
+		if err != nil {
+			utils.RespondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		techID, _ := utils.GetTestTechnicianID(c)
+		var body struct {
+			Latitude  float64 `json:"latitude"  binding:"required"`
+			Longitude float64 `json:"longitude" binding:"required"`
+			Accuracy  float64 `json:"accuracy"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			utils.RespondError(c, http.StatusBadRequest, "latitude et longitude sont requis")
+			return
+		}
+		if err := repository.UpdateLCULocation(c.Request.Context(), db, id, body.Latitude, body.Longitude); err != nil {
+			utils.RespondError(c, http.StatusInternalServerError, "Erreur mise à jour localisation LCU")
+			return
+		}
+		services.LogAction(c.Request.Context(), db, services.AuditEvent{
+			UserID: services.NullableUserID(techID), Action: "lcu_location_updated",
+			TargetType: "lcu", TargetID: services.NullableInt(id),
+			IPAddress: c.ClientIP(),
+			Metadata: map[string]any{"latitude": body.Latitude, "longitude": body.Longitude},
+		})
+		utils.RespondJSON(c, http.StatusOK, gin.H{
+			"status": "success", "message": "Localisation LCU mise à jour",
+			"lcu_id": id, "latitude": body.Latitude, "longitude": body.Longitude,
+		})
+	}
+}
+
 // POST /api/map/lampadaires/:id/dimming
 func HandleUpdateLampadaireDimming(db *sql.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -232,15 +268,36 @@ func HandleUpdateLampadaireDimming(db *sql.DB) gin.HandlerFunc {
 			utils.RespondError(c, http.StatusBadRequest, "intensité requise")
 			return
 		}
+		if body.Intensity < 0 || body.Intensity > 100 {
+			utils.RespondError(c, http.StatusBadRequest, "L'intensité doit être comprise entre 0 et 100")
+			return
+		}
 
-		// Simple update in mobile backend (parity with web's dimming_commands but simplified)
+		// Lire l'ancienne intensité pour l'historique dimming_commands
+		var oldIntensity int
+		if err := db.QueryRowContext(c.Request.Context(),
+			`SELECT intensite FROM lampadaires WHERE id = $1 AND archived_at IS NULL`, id,
+		).Scan(&oldIntensity); err != nil {
+			utils.RespondError(c, http.StatusNotFound, "Lampadaire introuvable ou archivé")
+			return
+		}
+
 		_, err = db.ExecContext(c.Request.Context(), `
-			UPDATE lampadaires SET intensite = $1, updated_at = NOW() WHERE id = $2
+			UPDATE lampadaires SET intensite = $1, last_command_at = NOW(), updated_at = NOW() WHERE id = $2
 		`, body.Intensity, id)
 
 		if err != nil {
 			utils.RespondError(c, http.StatusInternalServerError, "Erreur mise à jour intensité")
 			return
+		}
+
+		// Historique dans dimming_commands (même table que le web).
+		// Tolérant : si la contrainte source n'est pas encore migrée, on logge sans bloquer.
+		if _, err := db.ExecContext(c.Request.Context(), `
+			INSERT INTO dimming_commands (lampadaire_id, source, old_intensity, new_intensity, reason, status, applied_at)
+			VALUES ($1, 'technicien_mobile', $2, $3, NULLIF($4,''), 'applied', NOW())
+		`, id, oldIntensity, body.Intensity, body.Reason); err != nil {
+			log.Printf("[dimming] historique dimming_commands non enregistré (lampadaire %d): %v", id, err)
 		}
 
 		services.LogAction(c.Request.Context(), db, services.AuditEvent{

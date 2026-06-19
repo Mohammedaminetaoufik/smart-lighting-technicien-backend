@@ -37,11 +37,22 @@ func main() {
 	}
 
 	router := gin.Default()
+	router.MaxMultipartMemory = 10 << 20 // 10 MiB
 
-	// CORS — allow all origins for development/testing
-	// TODO(auth): Restreindre CORS en production.
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "uploads"
+	}
+	router.Static("/uploads", uploadDir)
+
+	// CORS — "*" par défaut (app mobile Expo). En production, définir
+	// CORS_ORIGIN avec l'origine web autorisée (ex: https://tech.lamalif.ma).
+	corsOrigin := os.Getenv("CORS_ORIGIN")
+	if corsOrigin == "" {
+		corsOrigin = "*"
+	}
 	router.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Origin", corsOrigin)
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, X-Test-Technician-Id")
 		if c.Request.Method == "OPTIONS" {
@@ -74,6 +85,10 @@ func main() {
 		mobile.POST("/workorders/:id/resolve", controllers.HandleResolveWorkOrder(db))
 		mobile.POST("/workorders/:id/block", controllers.HandleBlockWorkOrder(db))
 
+		// Photos interventions
+		mobile.POST("/workorders/:id/photos", controllers.HandleUploadWorkOrderPhoto(db))
+		mobile.GET("/workorders/:id/photos", controllers.HandleListWorkOrderPhotos(db))
+
 		// Lampadaires (consultation terrain)
 		mobile.GET("/lampadaires", controllers.HandleListLampadaires(db))
 		mobile.GET("/lampadaires/:id/details", controllers.HandleLampadaireDetails(db))
@@ -92,6 +107,7 @@ func main() {
 		mobile.POST("/lcus/:id/test", controllers.HandleLCUTest(db))
 		mobile.POST("/lcus/:id/sync", controllers.HandleLCUSync(db))
 		mobile.POST("/lcus/:id/field-note", controllers.HandleLCUFieldNote(db))
+		mobile.POST("/lcus/:id/location", controllers.HandleUpdateLCULocation(db))
 
 		// Mise en service (commissioning terrain)
 		mobile.GET("/commissioning", controllers.HandleListCommissioning(db))

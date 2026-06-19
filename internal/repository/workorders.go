@@ -36,7 +36,8 @@ func ListTechnicianWorkOrders(ctx context.Context, db *sql.DB, f WorkOrderFilter
 		       l.id, COALESCE(l.reference,''), COALESCE(l.zone,''), l.latitude, l.longitude,
 		       COALESCE(l.etat,'offline'), l.intensite, l.puissance,
 		       lcu.id, COALESCE(lcu.reference,''), COALESCE(lcu.ip_address,''), COALESCE(lcu.zone,''),
-		       a.id, COALESCE(a.severity,''), COALESCE(a.message,'')
+		       a.id, COALESCE(a.severity,''), COALESCE(a.message,''),
+		       wo.source_alert_id, wo.maintenance_window_id
 		FROM work_orders wo
 		LEFT JOIN lampadaires l   ON l.id = wo.lampadaire_id
 		LEFT JOIN lcus lcu        ON lcu.id = l.lcu_id
@@ -107,7 +108,8 @@ func GetWorkOrderByID(ctx context.Context, db *sql.DB, id int) (*models.MobileWo
 		       l.id, COALESCE(l.reference,''), COALESCE(l.zone,''), l.latitude, l.longitude,
 		       COALESCE(l.etat,'offline'), l.intensite, l.puissance,
 		       lcu.id, COALESCE(lcu.reference,''), COALESCE(lcu.ip_address,''), COALESCE(lcu.zone,''),
-		       a.id, COALESCE(a.severity,''), COALESCE(a.message,'')
+		       a.id, COALESCE(a.severity,''), COALESCE(a.message,''),
+		       wo.source_alert_id, wo.maintenance_window_id
 		FROM work_orders wo
 		LEFT JOIN lampadaires l   ON l.id = wo.lampadaire_id
 		LEFT JOIN lcus lcu        ON lcu.id = l.lcu_id
@@ -127,7 +129,27 @@ func GetWorkOrderByID(ctx context.Context, db *sql.DB, id int) (*models.MobileWo
 	}
 	wo.Logs, _ = GetWorkOrderLogs(ctx, db, id)
 	wo.Telemetry, _ = GetLatestTelemetryForLampadaire(ctx, db, wo.Lampadaire)
+	wo.MaintenanceWindow, _ = getMaintenanceWindowForWO(ctx, db, wo.MaintenanceWindowID)
 	return &wo, nil
+}
+
+// getMaintenanceWindowForWO fetches the linked maintenance window (detail view only).
+func getMaintenanceWindowForWO(ctx context.Context, db *sql.DB, mwID *int) (*models.MobileMaintenanceWindow, error) {
+	if mwID == nil {
+		return nil, nil
+	}
+	var mw models.MobileMaintenanceWindow
+	var reason sql.NullString
+	err := db.QueryRowContext(ctx, `
+		SELECT id, COALESCE(title,''), COALESCE(status,'planned'),
+		       COALESCE(impact_level,'low'), start_at, end_at, COALESCE(reason,'')
+		FROM maintenance_windows WHERE id=$1`, *mwID).
+		Scan(&mw.ID, &mw.Title, &mw.Status, &mw.ImpactLevel, &mw.StartAt, &mw.EndAt, &reason)
+	if err != nil {
+		return nil, err
+	}
+	mw.Reason = reason.String
+	return &mw, nil
 }
 
 func scanWorkOrderRow(rows *sql.Rows) (models.MobileWorkOrder, error) {
@@ -138,7 +160,7 @@ func scanWorkOrderRow(rows *sql.Rows) (models.MobileWorkOrder, error) {
 	var lIntensity sql.NullInt64
 	var lcuRef, lcuIP, lcuZone sql.NullString
 	var aSev, aMsg sql.NullString
-	var techID sql.NullInt64
+	var techID, sourceAlertID, mwID sql.NullInt64
 	err := rows.Scan(
 		&wo.ID, &wo.Title, &wo.Description, &wo.Status, &wo.Priority,
 		&wo.Zone, &wo.CreatedAt, &wo.UpdatedAt,
@@ -147,6 +169,7 @@ func scanWorkOrderRow(rows *sql.Rows) (models.MobileWorkOrder, error) {
 		&lID, &lRef, &lZone, &lLat, &lLng, &lEtat, &lIntensity, &lPuiss,
 		&lcuID, &lcuRef, &lcuIP, &lcuZone,
 		&aID, &aSev, &aMsg,
+		&sourceAlertID, &mwID,
 	)
 	if err != nil {
 		return wo, err
@@ -184,6 +207,14 @@ func scanWorkOrderRow(rows *sql.Rows) (models.MobileWorkOrder, error) {
 	if aID.Valid {
 		id := int(aID.Int64)
 		wo.Alert = &models.MobileAlert{ID: &id, Severity: aSev.String, Message: aMsg.String}
+	}
+	if sourceAlertID.Valid {
+		v := int(sourceAlertID.Int64)
+		wo.SourceAlertID = &v
+	}
+	if mwID.Valid {
+		v := int(mwID.Int64)
+		wo.MaintenanceWindowID = &v
 	}
 	return wo, nil
 }
@@ -249,7 +280,7 @@ func GetDashboardStats(ctx context.Context, db *sql.DB, techID int) (models.Dash
 	return stats, nil
 }
 
-// UpdateWorkOrderStatus transitions a work order to a new status.
+// UpdateWorkOrderStatus transitions a work order to a new status and syncs the linked maintenance window.
 func UpdateWorkOrderStatus(ctx context.Context, db *sql.DB, id, techID int, newStatus, note, resolutionNote string) error {
 	now := time.Now()
 	var err error
@@ -271,7 +302,34 @@ func UpdateWorkOrderStatus(ctx context.Context, db *sql.DB, id, techID int, newS
 			`UPDATE work_orders SET status=$1, updated_at=$2 WHERE id=$3`,
 			newStatus, now, id)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	syncMobileMaintenanceStatus(ctx, db, id, newStatus)
+	return nil
+}
+
+// syncMobileMaintenanceStatus propagates WO status changes to the linked maintenance window.
+func syncMobileMaintenanceStatus(ctx context.Context, db *sql.DB, workOrderID int, newStatus string) {
+	var mwID sql.NullInt64
+	_ = db.QueryRowContext(ctx, `SELECT maintenance_window_id FROM work_orders WHERE id=$1`, workOrderID).Scan(&mwID)
+	if !mwID.Valid {
+		return
+	}
+	id := mwID.Int64
+	switch newStatus {
+	case "in_progress":
+		_, _ = db.ExecContext(ctx, `UPDATE maintenance_windows SET status='in_progress', updated_at=NOW()
+			WHERE id=$1 AND status='planned'`, id)
+	case "resolved", "closed":
+		var pending int
+		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM work_orders
+			WHERE maintenance_window_id=$1 AND status NOT IN ('resolved','closed','cancelled')`, id).Scan(&pending)
+		if pending == 0 {
+			_, _ = db.ExecContext(ctx, `UPDATE maintenance_windows SET status='completed', completed_at=NOW(), updated_at=NOW()
+				WHERE id=$1 AND status NOT IN ('completed','cancelled')`, id)
+		}
+	}
 }
 
 // InsertWorkOrderLog inserts a log entry for a work order action.

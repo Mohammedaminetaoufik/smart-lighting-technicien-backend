@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+
 func RespondJSON(c *gin.Context, status int, data any) {
 	c.JSON(status, data)
 }
@@ -25,10 +26,15 @@ func ParseIDParam(c *gin.Context, name string) (int, error) {
 	return id, nil
 }
 
-// GetTestTechnicianID résout le technicien de test depuis query param, header, env ou défaut.
-// TODO(auth): Quand AUTH_ENABLED=true, extraire l'id depuis le JWT Bearer token
-// et supprimer cette fonction — utiliser c.Get("technician_id") injecté par le middleware.
+// GetTestTechnicianID returns the authenticated technician ID from the JWT context
+// (set by RequireAuth middleware), falling back to query param or header for testing.
 func GetTestTechnicianID(c *gin.Context) (int, string) {
+	// JWT context — primary source when middleware is active
+	if v, exists := c.Get("user_id"); exists {
+		if id, err := strconv.Atoi(fmt.Sprint(v)); err == nil && id > 0 {
+			return id, "jwt"
+		}
+	}
 	if v := c.Query("technician_id"); v != "" {
 		if id, err := strconv.Atoi(v); err == nil && id > 0 {
 			return id, "query"

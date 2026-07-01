@@ -93,6 +93,7 @@ func HandleSyncPush(db *sql.DB) gin.HandlerFunc {
 		}
 		// Allow technician_id override from query param
 		techID, _ := utils.GetTestTechnicianID(c)
+		techName := c.GetString("user_name")
 		if req.TechnicianID > 0 {
 			techID = req.TechnicianID
 		}
@@ -110,7 +111,7 @@ func HandleSyncPush(db *sql.DB) gin.HandlerFunc {
 				})
 				continue
 			}
-			result := services.ApplySyncAction(c.Request.Context(), db, action, techID, deviceID)
+			result := services.ApplySyncAction(c.Request.Context(), db, action, techID, techName, deviceID)
 			results = append(results, result)
 		}
 		if results == nil { results = []models.SyncActionResult{} }
@@ -135,6 +136,7 @@ func HandleSyncFull(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		techID, _ := utils.GetTestTechnicianID(c)
+		techName := c.GetString("user_name")
 		if req.TechnicianID > 0 { techID = req.TechnicianID }
 		deviceID := req.DeviceID
 		if deviceID == "" { deviceID = "unknown" }
@@ -143,7 +145,7 @@ func HandleSyncFull(db *sql.DB) gin.HandlerFunc {
 		var results []models.SyncActionResult
 		for _, action := range req.Actions {
 			if action.LocalID == "" { continue }
-			results = append(results, services.ApplySyncAction(c.Request.Context(), db, action, techID, deviceID))
+			results = append(results, services.ApplySyncAction(c.Request.Context(), db, action, techID, techName, deviceID))
 		}
 
 		// Bootstrap data

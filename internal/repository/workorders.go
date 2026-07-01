@@ -333,8 +333,7 @@ func syncMobileMaintenanceStatus(ctx context.Context, db *sql.DB, workOrderID in
 }
 
 // InsertWorkOrderLog inserts a log entry for a work order action.
-func InsertWorkOrderLog(ctx context.Context, db *sql.DB, workOrderID, techID int, action, note, oldStatus, newStatus string) error {
-	techName := fmt.Sprintf("Technicien #%d", techID)
+func InsertWorkOrderLog(ctx context.Context, db *sql.DB, workOrderID, techID int, techName, action, note, oldStatus, newStatus string) error {
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO work_order_logs (work_order_id, user_id, user_name, role, action, note, old_status, new_status)
 		VALUES ($1, $2, $3, 'technician', $4, $5, $6, $7)`,

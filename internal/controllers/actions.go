@@ -30,14 +30,7 @@ func HandleAcceptWorkOrder(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		techID, _ := utils.GetTestTechnicianID(c)
-		// Override from body if provided
-		var body struct {
-			TechnicianID int `json:"technician_id"`
-		}
-		_ = c.ShouldBindJSON(&body)
-		if body.TechnicianID > 0 {
-			techID = body.TechnicianID
-		}
+		techName := c.GetString("user_name")
 
 		curStatus, err := repository.GetWorkOrderCurrentStatus(c.Request.Context(), db, id)
 		if err != nil {
@@ -52,7 +45,7 @@ func HandleAcceptWorkOrder(db *sql.DB) gin.HandlerFunc {
 			utils.RespondError(c, http.StatusInternalServerError, "Erreur mise à jour")
 			return
 		}
-		_ = repository.InsertWorkOrderLog(c.Request.Context(), db, id, techID, "accepted", "", curStatus, "accepted")
+		_ = repository.InsertWorkOrderLog(c.Request.Context(), db, id, techID, techName, "accepted", "", curStatus, "accepted")
 		services.LogAction(c.Request.Context(), db, services.AuditEvent{
 			UserID: services.NullableUserID(techID), Action: "workorder_accepted",
 			TargetType: "work_order", TargetID: services.NullableInt(id),
@@ -75,9 +68,7 @@ func HandleStartWorkOrder(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		techID, _ := utils.GetTestTechnicianID(c)
-		var body struct{ TechnicianID int `json:"technician_id"` }
-		_ = c.ShouldBindJSON(&body)
-		if body.TechnicianID > 0 { techID = body.TechnicianID }
+		techName := c.GetString("user_name")
 
 		curStatus, err := repository.GetWorkOrderCurrentStatus(c.Request.Context(), db, id)
 		if err != nil {
@@ -92,7 +83,7 @@ func HandleStartWorkOrder(db *sql.DB) gin.HandlerFunc {
 			utils.RespondError(c, http.StatusInternalServerError, "Erreur mise à jour")
 			return
 		}
-		_ = repository.InsertWorkOrderLog(c.Request.Context(), db, id, techID, "started", "", curStatus, "in_progress")
+		_ = repository.InsertWorkOrderLog(c.Request.Context(), db, id, techID, techName, "started", "", curStatus, "in_progress")
 		services.LogAction(c.Request.Context(), db, services.AuditEvent{
 			UserID: services.NullableUserID(techID), Action: "workorder_started",
 			TargetType: "work_order", TargetID: services.NullableInt(id),
@@ -114,17 +105,16 @@ func HandleAddNote(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		techID, _ := utils.GetTestTechnicianID(c)
+		techName := c.GetString("user_name")
 		var body struct {
-			Note         string `json:"note"`
-			TechnicianID int    `json:"technician_id"`
+			Note string `json:"note"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil || body.Note == "" {
 			utils.RespondError(c, http.StatusBadRequest, "Le champ 'note' est requis")
 			return
 		}
-		if body.TechnicianID > 0 { techID = body.TechnicianID }
 		curStatus, _ := repository.GetWorkOrderCurrentStatus(c.Request.Context(), db, id)
-		if err := repository.InsertWorkOrderLog(c.Request.Context(), db, id, techID, "note_added", body.Note, curStatus, curStatus); err != nil {
+		if err := repository.InsertWorkOrderLog(c.Request.Context(), db, id, techID, techName, "note_added", body.Note, curStatus, curStatus); err != nil {
 			utils.RespondError(c, http.StatusInternalServerError, "Erreur ajout de note")
 			return
 		}
@@ -144,15 +134,16 @@ func HandleResolveWorkOrder(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		techID, _ := utils.GetTestTechnicianID(c)
+		techName := c.GetString("user_name")
 		var body struct {
 			ResolutionNote string `json:"resolution_note"`
 			Note           string `json:"note"`
-			TechnicianID   int    `json:"technician_id"`
 		}
 		_ = c.ShouldBindJSON(&body)
-		if body.TechnicianID > 0 { techID = body.TechnicianID }
 		note := body.ResolutionNote
-		if note == "" { note = body.Note }
+		if note == "" {
+			note = body.Note
+		}
 
 		curStatus, err := repository.GetWorkOrderCurrentStatus(c.Request.Context(), db, id)
 		if err != nil {
@@ -167,7 +158,7 @@ func HandleResolveWorkOrder(db *sql.DB) gin.HandlerFunc {
 			utils.RespondError(c, http.StatusInternalServerError, "Erreur mise à jour")
 			return
 		}
-		_ = repository.InsertWorkOrderLog(c.Request.Context(), db, id, techID, "resolved", note, curStatus, "resolved")
+		_ = repository.InsertWorkOrderLog(c.Request.Context(), db, id, techID, techName, "resolved", note, curStatus, "resolved")
 		services.LogAction(c.Request.Context(), db, services.AuditEvent{
 			UserID: services.NullableUserID(techID), Action: "workorder_resolved",
 			TargetType: "work_order", TargetID: services.NullableInt(id),
@@ -189,17 +180,16 @@ func HandleBlockWorkOrder(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		techID, _ := utils.GetTestTechnicianID(c)
+		techName := c.GetString("user_name")
 		var body struct {
-			Note         string `json:"note"`
-			TechnicianID int    `json:"technician_id"`
+			Note string `json:"note"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil || body.Note == "" {
 			utils.RespondError(c, http.StatusBadRequest, "Le champ 'note' est requis")
 			return
 		}
-		if body.TechnicianID > 0 { techID = body.TechnicianID }
 		curStatus, _ := repository.GetWorkOrderCurrentStatus(c.Request.Context(), db, id)
-		_ = repository.InsertWorkOrderLog(c.Request.Context(), db, id, techID, "blocked", body.Note, curStatus, curStatus)
+		_ = repository.InsertWorkOrderLog(c.Request.Context(), db, id, techID, techName, "blocked", body.Note, curStatus, curStatus)
 		utils.RespondJSON(c, http.StatusOK, gin.H{
 			"status": "success", "message": "Blocage enregistré",
 			"work_order_id": id, "technician_id": techID,

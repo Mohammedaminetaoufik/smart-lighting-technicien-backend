@@ -3,40 +3,92 @@ package middleware
 import (
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
-// RequireAuth is a placeholder middleware.
-// TODO(auth): Quand AUTH_ENABLED=true, implémenter la vérification JWT :
-//  1. Extraire le token depuis le header "Authorization: Bearer <token>"
-//  2. Valider la signature avec JWT_SECRET
-//  3. Extraire technician_id, user_name, user_role depuis les claims
-//  4. Injecter dans le contexte Gin : c.Set("technician_id", claims.Sub)
-//  5. Retourner 401 si token absent ou invalide
-//  6. Retourner 403 si le rôle n'est pas technicien
-//
-// Pour l'instant (AUTH_ENABLED=false) : route complètement ouverte.
+type AuthClaims struct {
+	Sub   string `json:"sub"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
+	jwt.RegisteredClaims
+}
+
 func RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if os.Getenv("AUTH_ENABLED") == "true" {
-			// TODO(auth): Insérer ici la logique JWT
-			c.JSON(http.StatusNotImplemented, gin.H{
-				"error":   "Auth not implemented",
-				"message": "Set AUTH_ENABLED=false pour le mode test",
-			})
+		header := c.GetHeader("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token manquant"})
 			c.Abort()
 			return
 		}
-		// Mode test : pas d'authentification
+		raw := strings.TrimPrefix(header, "Bearer ")
+
+		secret := os.Getenv("JWT_SECRET")
+		if secret == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "configuration serveur invalide"})
+			c.Abort()
+			return
+		}
+
+		token, err := jwt.ParseWithClaims(raw, &AuthClaims{}, func(t *jwt.Token) (any, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return []byte(secret), nil
+		})
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token invalide ou expiré"})
+			c.Abort()
+			return
+		}
+
+		claims, ok := token.Claims.(*AuthClaims)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token malformé"})
+			c.Abort()
+			return
+		}
+
+		c.Set("user_id", claims.Sub)
+		c.Set("user_name", claims.Name)
+		c.Set("user_email", claims.Email)
+		c.Set("user_role", claims.Role)
 		c.Next()
 	}
 }
 
-// OptionalAuth extrait les informations du token si présent, sans bloquer.
-// TODO(auth): Quand AUTH_ENABLED=true, parser le JWT et injecter les claims.
+// OptionalAuth extracts user info from a Bearer token if present, without blocking.
 func OptionalAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			c.Next()
+			return
+		}
+		raw := strings.TrimPrefix(header, "Bearer ")
+		secret := os.Getenv("JWT_SECRET")
+		if secret == "" {
+			c.Next()
+			return
+		}
+		token, err := jwt.ParseWithClaims(raw, &AuthClaims{}, func(t *jwt.Token) (any, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return []byte(secret), nil
+		})
+		if err == nil && token.Valid {
+			if claims, ok := token.Claims.(*AuthClaims); ok {
+				c.Set("user_id", claims.Sub)
+				c.Set("user_name", claims.Name)
+				c.Set("user_email", claims.Email)
+				c.Set("user_role", claims.Role)
+			}
+		}
 		c.Next()
 	}
 }

@@ -12,7 +12,7 @@ import (
 
 // ApplySyncAction applies one SyncAction and returns a SyncActionResult.
 // It is idempotent: if the local_id was already processed, the cached result is returned.
-func ApplySyncAction(ctx context.Context, db *sql.DB, action models.SyncAction, techID int, deviceID string) models.SyncActionResult {
+func ApplySyncAction(ctx context.Context, db *sql.DB, action models.SyncAction, techID int, techName, deviceID string) models.SyncActionResult {
 	// Idempotence check
 	existing, _ := repository.GetSyncLogByLocalID(ctx, db, action.LocalID)
 	if existing != nil {
@@ -44,7 +44,7 @@ func ApplySyncAction(ctx context.Context, db *sql.DB, action models.SyncAction, 
 			status, message = "conflict", fmt.Sprintf("Bon de travail #%d déjà pris par un autre technicien", action.EntityID)
 			break
 		}
-		err := applyWorkOrderTransition(ctx, db, action.EntityID, techID, "accepted", "", "")
+		err := applyWorkOrderTransition(ctx, db, action.EntityID, techID, techName, "accepted", "", "")
 		if err != nil {
 			status, errMsg, message = "error", err.Error(), err.Error()
 		} else {
@@ -52,7 +52,7 @@ func ApplySyncAction(ctx context.Context, db *sql.DB, action models.SyncAction, 
 		}
 
 	case "START_WORK_ORDER":
-		err := applyWorkOrderTransition(ctx, db, action.EntityID, techID, "in_progress", "", "")
+		err := applyWorkOrderTransition(ctx, db, action.EntityID, techID, techName, "in_progress", "", "")
 		if err != nil {
 			status, errMsg, message = "error", err.Error(), err.Error()
 		} else {
@@ -66,7 +66,7 @@ func ApplySyncAction(ctx context.Context, db *sql.DB, action models.SyncAction, 
 			break
 		}
 		curStatus, _ := repository.GetWorkOrderCurrentStatus(ctx, db, action.EntityID)
-		err := repository.InsertWorkOrderLog(ctx, db, action.EntityID, techID, "note_added", note, curStatus, curStatus)
+		err := repository.InsertWorkOrderLog(ctx, db, action.EntityID, techID, techName, "note_added", note, curStatus, curStatus)
 		if err != nil {
 			status, errMsg, message = "error", err.Error(), err.Error()
 		} else {
@@ -78,7 +78,7 @@ func ApplySyncAction(ctx context.Context, db *sql.DB, action models.SyncAction, 
 		if note == "" {
 			note, _ = action.Payload["note"].(string)
 		}
-		err := applyWorkOrderTransition(ctx, db, action.EntityID, techID, "resolved", "", note)
+		err := applyWorkOrderTransition(ctx, db, action.EntityID, techID, techName, "resolved", "", note)
 		if err != nil {
 			status, errMsg, message = "error", err.Error(), err.Error()
 		} else {
@@ -88,7 +88,7 @@ func ApplySyncAction(ctx context.Context, db *sql.DB, action models.SyncAction, 
 	case "BLOCK_WORK_ORDER":
 		note, _ := action.Payload["note"].(string)
 		curStatus, _ := repository.GetWorkOrderCurrentStatus(ctx, db, action.EntityID)
-		err := repository.InsertWorkOrderLog(ctx, db, action.EntityID, techID, "blocked", note, curStatus, curStatus)
+		err := repository.InsertWorkOrderLog(ctx, db, action.EntityID, techID, techName, "blocked", note, curStatus, curStatus)
 		if err != nil {
 			status, errMsg, message = "error", err.Error(), err.Error()
 		} else {
@@ -222,7 +222,7 @@ func ApplySyncAction(ctx context.Context, db *sql.DB, action models.SyncAction, 
 	}
 }
 
-func applyWorkOrderTransition(ctx context.Context, db *sql.DB, id, techID int, newStatus, note, resolutionNote string) error {
+func applyWorkOrderTransition(ctx context.Context, db *sql.DB, id, techID int, techName, newStatus, note, resolutionNote string) error {
 	curStatus, err := repository.GetWorkOrderCurrentStatus(ctx, db, id)
 	if err != nil {
 		return fmt.Errorf("bon de travail #%d introuvable", id)
@@ -230,7 +230,7 @@ func applyWorkOrderTransition(ctx context.Context, db *sql.DB, id, techID int, n
 	if err := repository.UpdateWorkOrderStatus(ctx, db, id, techID, newStatus, note, resolutionNote); err != nil {
 		return err
 	}
-	return repository.InsertWorkOrderLog(ctx, db, id, techID, newStatus, note, curStatus, newStatus)
+	return repository.InsertWorkOrderLog(ctx, db, id, techID, techName, newStatus, note, curStatus, newStatus)
 }
 
 func toFloat(v any) (float64, bool) {

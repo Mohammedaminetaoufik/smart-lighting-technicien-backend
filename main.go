@@ -14,6 +14,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"technicien-mobile/internal/controllers"
+	"technicien-mobile/internal/middleware"
 	"technicien-mobile/internal/repository"
 )
 
@@ -62,11 +63,13 @@ func main() {
 		c.Next()
 	})
 
+	// Public auth endpoint
+	router.POST("/api/auth/login", controllers.HandleLogin(db))
+
 	// ──────────────────────────────────────────────
-	// Mobile API routes — /api/mobile/*
-	// TODO(auth): Quand AUTH_ENABLED=true, ajouter middleware.RequireAuth() sur ces routes.
+	// Mobile API routes — /api/mobile/*  (JWT required)
 	// ──────────────────────────────────────────────
-	mobile := router.Group("/api/mobile")
+	mobile := router.Group("/api/mobile", middleware.RequireAuth())
 	{
 		mobile.GET("/health", controllers.HandleHealth())
 		mobile.GET("/test-context", controllers.HandleTestContext())
@@ -127,11 +130,9 @@ func main() {
 	}
 
 	// ──────────────────────────────────────────────
-	// Map API routes — /api/map/*
-	// Partagées entre la partie web et la partie technicien.
-	// TODO(auth): Quand AUTH_ENABLED=true, protéger les routes sensibles.
+	// Map API routes — /api/map/*  (JWT required)
 	// ──────────────────────────────────────────────
-	mapGroup := router.Group("/api/map")
+	mapGroup := router.Group("/api/map", middleware.RequireAuth())
 	{
 		mapGroup.GET("/overview", controllers.HandleMapOverview(db))
 		mapGroup.GET("/lampadaires", controllers.HandleMapLampadaires(db))
@@ -155,7 +156,6 @@ func main() {
 
 	go func() {
 		log.Printf("[main] Serveur technicien démarré sur http://localhost:%s", port)
-		log.Printf("[main] AUTH_ENABLED=%s — routes ouvertes pour les tests", os.Getenv("AUTH_ENABLED"))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[main] erreur serveur: %v", err)
 		}
